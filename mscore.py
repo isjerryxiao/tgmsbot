@@ -18,7 +18,9 @@ IS_MINE = 9
 DEAD = 20
 
 def check_params(height, width, mines):
-    if mines > height * width:
+    if height <= 0 or width <= 0:
+        return (False, "地图太小!")
+    elif mines > height * width:
         return (False, "放不下这么多雷嘛!")
     elif mines == height * width:
         return (False, "一点就爆炸，有意思吗？")
@@ -101,8 +103,6 @@ class Board():
         if not automatic and self.map[row][col] == 9:
             self.map[row][col] = DEAD
             self.state = 3
-        elif self.__do_i_win():
-            self.state = 2
         elif self.map[row][col] == 0:
             self.map[row][col] += 10 # open this block
             # open other blocks
@@ -125,6 +125,8 @@ class Board():
                     self.__open(nbr[0], nbr[1], automatic=True)
         else:
             self.map[row][col] += 10
+        if self.__do_i_win():
+            self.state = 2
 
     def move(self, row_col):
         if self.state == 0:

@@ -104,7 +104,7 @@ def send_keyboard(bot, update, args):
         else:
             msg.reply_text(ck[1])
             return
-    if len(args) == 0:
+    elif len(args) == 0:
         board = Board(HEIGHT, WIDTH, MINES)
     else:
         msg.reply_text('你输入的是什么鬼！')
@@ -163,7 +163,7 @@ def handle_button_click(bot, update):
     else:
         mmap = deepcopy(board.map)
     board.move((row, col))
-    if FIRST_MOVE or (not array_equal(board.map, mmap)):
+    if FIRST_MOVE or (not array_equal(board.map, mmap)) or board.state == 2:
         keyboard = list()
         for row in range(board.height):
             current_row = list()
