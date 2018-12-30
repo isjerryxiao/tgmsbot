@@ -122,6 +122,10 @@ def send_keyboard(bot, update, args):
         if width > 8:
             width = 8
             msg.reply_text('宽度太大，已经帮您设置成8了')
+        # telegram doesn't like keyboard keys to exceed 100
+        if height * width > 100:
+            msg.reply_text('格数不能超过100')
+            return
         ck = check_params(height, width, mines)
         if ck[0]:
             board = Board(height, width, mines)
