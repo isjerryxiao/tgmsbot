@@ -118,6 +118,10 @@ def send_keyboard(bot, update, args):
             mines = int(args[2])
         except:
             pass
+        # telegram doesn't like keyboard width to exceed 8
+        if width > 8:
+            width = 8
+            msg.reply_text('宽度太大，已经帮您设置成8了')
         ck = check_params(height, width, mines)
         if ck[0]:
             board = Board(height, width, mines)
@@ -144,6 +148,8 @@ def send_keyboard(bot, update, args):
                      parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 def send_help(bot, update):
+    msg = update.message
+    msg.reply_text("这是一个扫雷bot\n\n/mine@{} 开始新游戏".format(bot.username))
     logger.debug("Start from {0}".format(update.message.from_user.id))
 
 def send_source(bot, update):
@@ -215,6 +221,7 @@ def handle_button_click(bot, update):
         if mmap is not None:
             game.save_action(user, (row, col))
             update_keyboard(bot, bhash, game, chat_id, msg.message_id)
+        (s_op, s_is, s_3bv) = board.gen_statistics()
         ops_count = game.actions_sum()
         ops_list = game.get_actions()
         last_player = game.get_last_player()
@@ -225,7 +232,7 @@ def handle_button_click(bot, update):
             template = WIN_TEXT_TEMPLATE
         else:
             template = LOSE_TEXT_TEMPLATE
-        myreply = template.format(s_op=0, s_is=0, s_3bv=0, ops_count=ops_count,
+        myreply = template.format(s_op=s_op, s_is=s_is, s_3bv=s_3bv, ops_count=ops_count,
                                             ops_list=ops_list, last_player=last_player,
                                             time=round(time_used, 4), timeouts=timeouts,
                                             bot_username=bot_username)

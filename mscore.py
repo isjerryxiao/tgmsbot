@@ -137,3 +137,42 @@ class Board():
             self.state = 1
         (row, col) = row_col
         self.__open(row, col)
+
+    def gen_statistics(self):
+        self.__visited = np.zeros((self.height, self.width), dtype=np.int8)
+        self.__op = 0
+        self.__is = 0
+        self.__3bv = 0
+        def scan_open(row, col):
+            self.__visited[row][col] = 1
+            for nbr_rc in self.__iter_neighbour(row, col):
+                (nrow, ncol) = nbr_rc
+                if self.__visited[nrow][ncol] == 0:
+                    nbr = self.mmap[nrow][ncol]
+                    if nbr == 0:
+                        scan_open(nrow, ncol)
+                    elif nbr <= 8:
+                        self.__visited[nrow][ncol] = 1
+        def scan_island(row, col):
+            self.__3bv += 1
+            self.__visited[row, col] = 1
+            for nbr_rc in self.__iter_neighbour(row, col):
+                (nrow, ncol) = nbr_rc
+                if self.__visited[nrow][ncol] == 0:
+                    nbr = self.mmap[nrow][ncol]
+                    if nbr >= 1 and nbr <= 8:
+                        scan_island(nrow, ncol)
+
+        for row in range(self.height):
+            for col in range(self.width):
+                if self.__visited[row][col] == 0 and self.mmap[row][col] == 0:
+                    self.__op += 1
+                    self.__3bv += 1
+                    scan_open(row, col)
+        for row in range(self.height):
+            for col in range(self.width):
+                cell = self.mmap[row][col]
+                if self.__visited[row][col] == 0 and cell >= 1 and cell <= 8:
+                    self.__is += 1
+                    scan_island(row, col)
+        return (self.__op, self.__is, self.__3bv)
