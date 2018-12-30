@@ -27,12 +27,12 @@ WIN_TEXT_TEMPLATE = "哇所有奇怪的地方都被你打开啦…好羞羞\n" \
                     "地图：Op {s_op} / Is {s_is} / 3bv {s_3bv}\n操作总数 {ops_count}\n" \
                     "统计：\n{ops_list}\n{last_player} 你要对人家负责哟/// ///\n\n" \
                     "用时{time}秒，超时{timeouts}次\n\n" \
-                    "/mine@{bot_username} 开始新游戏"
+                    "/mine 开始新游戏"
 LOSE_TEXT_TEMPLATE = "一道火光之后，你就在天上飞了呢…好奇怪喵\n" \
                     "地图：Op {s_op} / Is {s_is} / 3bv {s_3bv}\n操作总数 {ops_count}\n" \
                     "统计：\n{ops_list}\n{last_player} 是我们中出的叛徒！\n\n" \
                     "用时{time}秒，超时{timeouts}次\n\n" \
-                    "/mine@{bot_username} 开始新游戏"
+                    "/mine 开始新游戏"
 
 
 def display_username(user, atuser=True, shorten=False, markdown=True):
@@ -153,7 +153,7 @@ def send_keyboard(bot, update, args):
 
 def send_help(bot, update):
     msg = update.message
-    msg.reply_text("这是一个扫雷bot\n\n/mine@{} 开始新游戏".format(bot.username))
+    msg.reply_text("这是一个扫雷bot\n\n/mine 开始新游戏")
     logger.debug("Start from {0}".format(update.message.from_user.id))
 
 def send_source(bot, update):
@@ -229,7 +229,6 @@ def handle_button_click(bot, update):
         ops_count = game.actions_sum()
         ops_list = game.get_actions()
         last_player = game.get_last_player()
-        bot_username = bot.username
         time_used = time.time() - game.start_time
         timeouts = game.extra["timeout"]
         if board.state == 2:
@@ -238,8 +237,7 @@ def handle_button_click(bot, update):
             template = LOSE_TEXT_TEMPLATE
         myreply = template.format(s_op=s_op, s_is=s_is, s_3bv=s_3bv, ops_count=ops_count,
                                             ops_list=ops_list, last_player=last_player,
-                                            time=round(time_used, 4), timeouts=timeouts,
-                                            bot_username=bot_username)
+                                            time=round(time_used, 4), timeouts=timeouts)
         msg.reply_text(myreply, parse_mode="Markdown")
         game_manager.remove(bhash)
     else:
