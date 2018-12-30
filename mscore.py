@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 from random import randint
+from copy import deepcopy
 
 # 0 - 8: means 0-8 mines, not opened
 # opened block = the value of not opened block + 10
@@ -42,6 +43,7 @@ class Board():
         self.width = width
         self.mines = mines
         self.map = None
+        self.mmap = None
         self.moves = list()
         self.state = 0 # 0:not playing, 1:playing, 2:win, 3:dead
     def __gen_map(self, first_move):
@@ -72,6 +74,7 @@ class Board():
                         if nbr_value == IS_MINE:
                             mine_count += 1
                     self.map[row][col] = mine_count
+        self.mmap = deepcopy(self.map)
     def __iter_neighbour(self, row, col, return_rc=True):
         height = self.height
         width = self.width

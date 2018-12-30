@@ -4,7 +4,9 @@ from mscore import Board, check_params
 from copy import deepcopy
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
+from telegram.error import TimedOut as TimedOutError
 from numpy import array_equal
+import time
 import logging
 
 logging.basicConfig(level=logging.INFO,format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -20,6 +22,17 @@ MINES = 9
 UNOPENED_CELL = "\u2588"
 FLAGGED_CELL = "\u259a"
 STEPPED_CELL = "*"
+
+WIN_TEXT_TEMPLATE = "哇所有奇怪的地方都被你打开啦…好羞羞\n" \
+                    "地图：Op {s_op} / Is {s_is} / 3bv {s_3bv}\n操作总数 {ops_count}\n" \
+                    "统计：\n{ops_list}\n{last_player} 你要对人家负责哟/// ///\n\n" \
+                    "用时{time}秒，超时{timeouts}次\n\n" \
+                    "/mine@{bot_username} 开始新游戏"
+LOSE_TEXT_TEMPLATE = "一道火光之后，你就在天上飞了呢…好奇怪喵\n" \
+                    "地图：Op {s_op} / Is {s_is} / 3bv {s_3bv}\n操作总数 {ops_count}\n" \
+                    "统计：\n{ops_list}\n{last_player} 是我们中出的叛徒！\n\n" \
+                    "用时{time}秒，超时{timeouts}次\n\n" \
+                    "/mine@{bot_username} 开始新游戏"
 
 
 def display_username(user, atuser=True, shorten=False, markdown=True):
@@ -40,43 +53,50 @@ def display_username(user, atuser=True, shorten=False, markdown=True):
     return name
 
 class Game():
-    def __init__(self, board, board_hash, group, creators):
+    def __init__(self, board, group, creator):
         self.board = board
-        self.board_hash = board_hash
         self.group = group
-        self.creators = creators
+        self.creator = creator
         self.actions = dict()
+        self.last_player = None
+        self.start_time = time.time()
+        self.extra = {"timeout": 0}
     def save_action(self, user, spot):
         '''spot is supposed to be a tuple'''
+        self.last_player = user
         if self.actions.get(user, None):
             self.actions[user].append(spot)
         else:
             self.actions[user] = [spot,]
+    def actions_sum(self):
+        mysum = 0
+        for user in self.actions:
+            count = len(self.actions.get(user, list()))
+            mysum += count
+        return mysum
+    def get_last_player(self):
+        return display_username(self.last_player)
     def get_actions(self):
         '''Convert actions into text'''
         msg = ""
         for user in self.actions:
             count = len(self.actions.get(user, list()))
-            msg = "{}{}: {}项操作\n".format(msg, display_username(user), count)
+            msg = "{}{} - {}项操作\n".format(msg, display_username(user), count)
         return msg
 
 class GameManager:
-    __games = list()
+    __games = dict()
     def append(self, board, board_hash, group_id, creator_id):
-        self.__games.append(Game(board, board_hash, group_id, creator_id))
+        self.__games[board_hash] = Game(board, group_id, creator_id)
     def remove(self, board_hash):
         board = self.get_game_from_hash(board_hash)
         if board:
-            self.__games.remove(board)
+            del self.__games[board_hash]
             return True
         else:
             return False
     def get_game_from_hash(self, board_hash):
-        for gm in self.__games:
-            if gm.board_hash == board_hash:
-                return gm
-        else:
-            return None
+        return self.__games.get(board_hash, None)
     def count(self):
         return len(self.__games)
 
@@ -135,35 +155,8 @@ def send_status(bot, update):
     count = game_manager.count()
     update.message.reply_text('当前进行的游戏: {}'.format(count))
 
-def gen_keyboard(board):
-    pass
-
-def handle_button_click(bot, update):
-    msg = update.callback_query.message
-    user = update.callback_query.from_user
-    chat_id = update.callback_query.message.chat.id
-    data = update.callback_query.data
-    logger.debug('Button clicked by {}, data={}.'.format(user.id, data))
-    bot.answer_callback_query(callback_query_id=update.callback_query.id)
-    try:
-        data = data.split(' ')
-        data = [int(i) for i in data]
-        (bhash, row, col) = data
-    except Exception as err:
-        logger.info('Unknown callback data: {} from user {}'.format(data, user.id))
-        return
-    game = game_manager.get_game_from_hash(bhash)
-    if game is None:
-        logger.info("No game found for hash {}".format(bhash))
-        return
-    board = game.board
-    FIRST_MOVE = False
-    if board.state == 0:
-        FIRST_MOVE = True
-    else:
-        mmap = deepcopy(board.map)
-    board.move((row, col))
-    if FIRST_MOVE or (not array_equal(board.map, mmap)) or board.state == 2:
+def update_keyboard(bot, bhash, game, chat_id, message_id):
+    def gen_keyboard(board):
         keyboard = list()
         for row in range(board.height):
             current_row = list()
@@ -181,18 +174,68 @@ def handle_button_click(bot, update):
                 cell = InlineKeyboardButton(text=cell_text, callback_data="{} {} {}".format(bhash, row, col))
                 current_row.append(cell)
             keyboard.append(current_row)
-        if board.state != 1:
-            if board.state == 2:
-                reply_text = "Win"
-                game_manager.remove(bhash)
-            elif board.state == 3:
-                reply_text = "Lose"
-                game_manager.remove(bhash)
+        return keyboard
+    keyboard = gen_keyboard(game.board)
+    try:
+        bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id,
+                                        reply_markup=InlineKeyboardMarkup(keyboard))
+    except TimedOutError:
+        logger.debug('time out in game {}.'.format(bhash))
+        game.extra["timeout"] += 1
+
+def handle_button_click(bot, update):
+    msg = update.callback_query.message
+    user = update.callback_query.from_user
+    chat_id = update.callback_query.message.chat.id
+    data = update.callback_query.data
+    logger.debug('Button clicked by {}, data={}.'.format(user.id, data))
+    bot.answer_callback_query(callback_query_id=update.callback_query.id)
+    try:
+        data = data.split(' ')
+        data = [int(i) for i in data]
+        (bhash, row, col) = data
+    except Exception as err:
+        logger.info('Unknown callback data: {} from user {}'.format(data, user.id))
+        return
+    game = game_manager.get_game_from_hash(bhash)
+    if game is None:
+        logger.debug("No game found for hash {}".format(bhash))
+        return
+    board = game.board
+    if board.state == 0:
+        mmap = None
+        board.move((row, col))
+        game.save_action(user, (row, col))
+        update_keyboard(bot, bhash, game, chat_id, msg.message_id)
+    else:
+        mmap = deepcopy(board.map)
+        board.move((row, col))
+    if board.state != 1:
+        # if this is the first move, there's no mmap
+        if mmap is not None:
+            game.save_action(user, (row, col))
+            update_keyboard(bot, bhash, game, chat_id, msg.message_id)
+        ops_count = game.actions_sum()
+        ops_list = game.get_actions()
+        last_player = game.get_last_player()
+        bot_username = bot.username
+        time_used = time.time() - game.start_time
+        timeouts = game.extra["timeout"]
+        if board.state == 2:
+            template = WIN_TEXT_TEMPLATE
         else:
-            reply_text = msg.text_markdown
-        bot.edit_message_text(chat_id=chat_id, message_id=msg.message_id,
-                              text=reply_text, parse_mode="Markdown",
-                              reply_markup=InlineKeyboardMarkup(keyboard))
+            template = LOSE_TEXT_TEMPLATE
+        myreply = template.format(s_op=0, s_is=0, s_3bv=0, ops_count=ops_count,
+                                            ops_list=ops_list, last_player=last_player,
+                                            time=round(time_used, 4), timeouts=timeouts,
+                                            bot_username=bot_username)
+        msg.reply_text(myreply, parse_mode="Markdown")
+        game_manager.remove(bhash)
+    else:
+        if mmap is not None and (not array_equal(board.map, mmap)):
+            game.save_action(user, (row, col))
+            update_keyboard(bot, bhash, game, chat_id, msg.message_id)
+
 
 
 updater.dispatcher.add_handler(CommandHandler('start', send_help))
