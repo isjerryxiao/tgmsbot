@@ -60,6 +60,7 @@ class Game():
         self.actions = dict()
         self.last_player = None
         self.start_time = time.time()
+        self.stopped = False
         self.extra = {"timeout": 0}
     def save_action(self, user, spot):
         '''spot is supposed to be a tuple'''
@@ -211,6 +212,8 @@ def handle_button_click(bot, update):
     if game is None:
         logger.debug("No game found for hash {}".format(bhash))
         return
+    elif game.stopped:
+        return
     board = game.board
     if board.state == 0:
         mmap = None
@@ -221,6 +224,7 @@ def handle_button_click(bot, update):
         mmap = deepcopy(board.map)
         board.move((row, col))
     if board.state != 1:
+        game.stopped = True
         # if this is the first move, there's no mmap
         if mmap is not None:
             game.save_action(user, (row, col))
@@ -240,10 +244,9 @@ def handle_button_click(bot, update):
                                             time=round(time_used, 4), timeouts=timeouts)
         msg.reply_text(myreply, parse_mode="Markdown")
         game_manager.remove(bhash)
-    else:
-        if mmap is not None and (not array_equal(board.map, mmap)):
-            game.save_action(user, (row, col))
-            update_keyboard(bot, bhash, game, chat_id, msg.message_id)
+    elif mmap is not None and (not array_equal(board.map, mmap)):
+        game.save_action(user, (row, col))
+        update_keyboard(bot, bhash, game, chat_id, msg.message_id)
 
 
 
