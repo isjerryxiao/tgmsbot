@@ -17,7 +17,7 @@ updater = Updater(token, workers=16)
 job_queue = updater.job_queue
 job_queue.start()
 
-KBD_MIN_INTERVAL = 0.6
+KBD_MIN_INTERVAL = 0.9
 KBD_DELAY_SECS = 0.6
 
 HEIGHT = 8
