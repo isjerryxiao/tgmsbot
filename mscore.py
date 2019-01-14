@@ -46,6 +46,10 @@ class Board():
         self.mmap = None
         self.moves = list()
         self.state = 0 # 0:not playing, 1:playing, 2:win, 3:dead
+        # statistics
+        self.__op = 0
+        self.__is = 0
+        self.__3bv = 0
     def __gen_map(self, first_move):
         height = self.height
         width = self.width
@@ -139,10 +143,9 @@ class Board():
         self.__open(row, col)
 
     def gen_statistics(self):
+        if self.__op != 0:
+            return (self.__op, self.__is, self.__3bv)
         self.__visited = np.zeros((self.height, self.width), dtype=np.int8)
-        self.__op = 0
-        self.__is = 0
-        self.__3bv = 0
         def scan_open(row, col):
             self.__visited[row][col] = 1
             for nbr_rc in self.__iter_neighbour(row, col):
