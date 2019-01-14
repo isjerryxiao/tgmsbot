@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO,format='%(asctime)s - %(name)s - %(leveln
 logger = logging.getLogger(__name__)
 
 token = "token_here"
-updater = Updater(token, workers=16)
+updater = Updater(token, workers=8)
 job_queue = updater.job_queue
 job_queue.start()
 
