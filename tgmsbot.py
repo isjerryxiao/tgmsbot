@@ -354,7 +354,8 @@ def handle_button_click(bot, update):
         # if this is the first move, there's no mmap
         if mmap is not None:
             game.save_action(user, (row, col))
-            update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
+            if not array_equal(board.map, mmap):
+                update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
         (s_op, s_is, s_3bv) = board.gen_statistics()
         ops_count = game.actions_sum()
         ops_list = game.get_actions()
