@@ -40,7 +40,7 @@ WIN_TEXT_TEMPLATE = "哇所有奇怪的地方都被你打开啦…好羞羞\n" \
 STEP_TEXT_TEMPLATE = "{last_player} 踩到了地雷!\n" \
                     "时间{time}秒，超时{timeouts}次\n\n" \
                     "{last_player} {reward}\n\n" \
-                    "生命值：({remain}/{ttl})"
+                    "雷区生命值：({remain}/{ttl})"
 LOSE_TEXT_TEMPLATE = "一道火光之后，你就在天上飞了呢…好奇怪喵\n" \
                     "地图：Op {s_op} / Is {s_is} / 3bv {s_3bv}\n操作总数 {ops_count}\n" \
                     "统计：\n{ops_list}\n{last_player} 是我们中出的叛徒！\n\n" \

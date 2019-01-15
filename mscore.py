@@ -96,7 +96,7 @@ class Board():
         for x in np.nditer(self.map):
             if x <= 8:
                 unopened += 1
-            elif x == 19:
+            elif x in (19, DEAD):
                 mines_opened += 1
         if mines_opened == self.mines:
             return True
@@ -110,6 +110,7 @@ class Board():
         if not automatic and self.map[row][col] == 9:
             self.map[row][col] = DEAD
             self.state = 3
+            return
         elif self.map[row][col] == 0:
             self.map[row][col] += 10 # open this block
             # open other blocks
@@ -122,7 +123,7 @@ class Board():
             neighbour_mine_opened = 0
             neighbour_unopened = 0
             for neighbour in self.__iter_neighbour(row, col, return_rc=False):
-                if neighbour == 19:
+                if neighbour in (19, DEAD):
                     neighbour_mine_opened += 1
                 if neighbour <= 9:
                     neighbour_unopened += 1
