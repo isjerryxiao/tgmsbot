@@ -199,25 +199,37 @@ def gen_reward(user, negative=True):
     # Negative rewards
     def restrict_mining(player):
         if player.immunity_cards >= 1:
-            player.immunity_cards -= 1
-            ret = "用去一张免疫卡，还剩{}张".format(player.immunity_cards)
+            if player.immunity_cards >= 10:
+                lost_cards = randint(2,4)
+            elif player.immunity_cards >= 5:
+                lost_cards = randint(1,3)
+            else:
+                lost_cards = 1
+            player.immunity_cards -= lost_cards
+            ret = "用去{}张免疫卡，还剩{}张".format(lost_cards, player.immunity_cards)
         else:
             now = int(time.time())
             seconds = randint(30, 120)
             player.restricted_until = now + seconds
-            ret = "被限制扫雷{}秒".format(seconds)
+            ret = "没有免疫卡了，被限制扫雷{}秒".format(seconds)
         player.save()
         return ret
     # Positive rewards
     def give_immunity_cards(player):
-        if player.immunity_cards >= 3 and choice((True, False)):
-            action = "没收"
-            player.immunity_cards -= 1
-        else:
-            action = "奖励"
-            player.immunity_cards += 1
+        rewarded_cards = 0
+        if player.immunity_cards <= 3:
+            rewarded_cards = randint(1, 2)
+        elif player.immunity_cards <= 10:
+            if randint(1, 5) == 5:
+                rewarded_cards = 1
+        elif randint(1, 10) == 10:
+            rewarded_cards = 1
+        player.immunity_cards += rewarded_cards
         player.save()
-        return "被{}了一张免疫卡，共有{}张".format(action, player.immunity_cards)
+        if rewarded_cards == 0:
+            return "共有{}张免疫卡".format(player.immunity_cards)
+        else:
+            return "被奖励了{}张免疫卡，共有{}张".format(rewarded_cards, player.immunity_cards)
 
     player = get_player(user.id)
     if negative:
