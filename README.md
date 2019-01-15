@@ -7,4 +7,5 @@ The bot is currently running as [@archcnmsbot](http://telegram.me/archcnmsbot).
 To run the bot yourself, you will need: 
 - Python3
 - Numpy
+- [peewee ORM](http://docs.peewee-orm.com/en/latest/peewee/installation.html)
 - The [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) module
