@@ -9,6 +9,7 @@ from numpy import array_equal
 # If no peewee orm is installed, try `from data_ram import get_player`
 from data import get_player
 from random import randint, choice
+from threading import Lock
 import time
 import logging
 
@@ -75,6 +76,7 @@ class Game():
         self.last_player = None
         self.start_time = time.time()
         self.stopped = False
+        self.lock = Lock()
         # timestamp of the last update keyboard action,
         # it is used to calculate time gap between
         # two actions and identify unique actions.
@@ -338,17 +340,20 @@ def handle_button_click(bot, update):
     if game is None:
         logger.debug("No game found for hash {}".format(bhash))
         return
-    elif game.stopped:
+    game.lock.acquire()
+    if game.stopped:
         return
     board = game.board
     if board.state == 0:
         mmap = None
         board.move((row, col))
+        game.lock.release()
         game.save_action(user, (row, col))
         update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
     else:
         mmap = deepcopy(board.map)
         board.move((row, col))
+        game.lock.release()
     if board.state != 1:
         game.stopped = True
         # if this is the first move, there's no mmap
