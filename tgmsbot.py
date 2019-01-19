@@ -346,24 +346,15 @@ def handle_button_click(bot, update):
     board = game.board
     if board.state == 0:
         mmap = None
-        board.move((row, col))
-        if board.state != 1:
-            game.stopped = True
-        game.lock.release()
-        game.save_action(user, (row, col))
-        update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
     else:
         mmap = deepcopy(board.map)
-        board.move((row, col))
-        if board.state != 1:
-            game.stopped = True
+    board.move((row, col))
+    if board.state != 1:
+        game.stopped = True
         game.lock.release()
-
-        # if this is the first move, there's no mmap
-        if mmap is not None:
-            game.save_action(user, (row, col))
-            if not array_equal(board.map, mmap):
-                update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
+        game.save_action(user, (row, col))
+        if not array_equal(board.map, mmap):
+            update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
         (s_op, s_is, s_3bv) = board.gen_statistics()
         ops_count = game.actions_sum()
         ops_list = game.get_actions()
@@ -399,9 +390,12 @@ def handle_button_click(bot, update):
             logger.debug('timeout sending report for game {}'.format(bhash))
         if game.stopped:
             game_manager.remove(bhash)
-    elif mmap is not None and (not array_equal(board.map, mmap)):
+    elif mmap is None or (not array_equal(board.map, mmap)):
+        game.lock.release()
         game.save_action(user, (row, col))
         update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
+    else:
+        game.lock.release()
 
 
 
