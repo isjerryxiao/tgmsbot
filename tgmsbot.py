@@ -347,15 +347,18 @@ def handle_button_click(bot, update):
     if board.state == 0:
         mmap = None
         board.move((row, col))
+        if board.state != 1:
+            game.stopped = True
         game.lock.release()
         game.save_action(user, (row, col))
         update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
     else:
         mmap = deepcopy(board.map)
         board.move((row, col))
+        if board.state != 1:
+            game.stopped = True
         game.lock.release()
-    if board.state != 1:
-        game.stopped = True
+
         # if this is the first move, there's no mmap
         if mmap is not None:
             game.save_action(user, (row, col))
