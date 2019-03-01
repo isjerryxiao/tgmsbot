@@ -341,61 +341,68 @@ def handle_button_click(bot, update):
         logger.debug("No game found for hash {}".format(bhash))
         return
     game.lock.acquire()
-    if game.stopped:
-        return
-    board = game.board
-    if board.state == 0:
-        mmap = None
-    else:
-        mmap = deepcopy(board.map)
-    board.move((row, col))
-    if board.state != 1:
-        game.stopped = True
-        game.lock.release()
-        game.save_action(user, (row, col))
-        if not array_equal(board.map, mmap):
-            update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
-        (s_op, s_is, s_3bv) = board.gen_statistics()
-        ops_count = game.actions_sum()
-        ops_list = game.get_actions()
-        last_player = game.get_last_player()
-        time_used = time.time() - game.start_time
-        timeouts = game.timeouts
-        remain = 0
-        ttl = 0
-        if board.state == 2:
-            reward = gen_reward(game.last_player, negative=False)
-            template = WIN_TEXT_TEMPLATE
-        elif board.state == 3:
-            reward = gen_reward(game.last_player, negative=True)
-            game.lives -= 1
-            if game.lives <= 0:
-                template = LOSE_TEXT_TEMPLATE
-            else:
-                game.stopped = False
-                board.state = 1
-                remain = game.lives
-                ttl = game.ttl_lives
-                template = STEP_TEXT_TEMPLATE
-        else:
-            # Should not reach here
-            reward = None
-        myreply = template.format(s_op=s_op, s_is=s_is, s_3bv=s_3bv, ops_count=ops_count,
-                                  ops_list=ops_list, last_player=last_player,
-                                  time=round(time_used, 4), timeouts=timeouts, reward=reward,
-                                  remain=remain, ttl=ttl)
-        try:
-            msg.reply_text(myreply, parse_mode="Markdown")
-        except TimedOutError:
-            logger.debug('timeout sending report for game {}'.format(bhash))
+    try:
         if game.stopped:
-            game_manager.remove(bhash)
-    elif mmap is None or (not array_equal(board.map, mmap)):
-        game.lock.release()
-        game.save_action(user, (row, col))
-        update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
-    else:
-        game.lock.release()
+            return
+        board = game.board
+        if board.state == 0:
+            mmap = None
+        else:
+            mmap = deepcopy(board.map)
+        board.move((row, col))
+        if board.state != 1:
+            game.stopped = True
+            game.lock.release()
+            game.save_action(user, (row, col))
+            if not array_equal(board.map, mmap):
+                update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
+            (s_op, s_is, s_3bv) = board.gen_statistics()
+            ops_count = game.actions_sum()
+            ops_list = game.get_actions()
+            last_player = game.get_last_player()
+            time_used = time.time() - game.start_time
+            timeouts = game.timeouts
+            remain = 0
+            ttl = 0
+            if board.state == 2:
+                reward = gen_reward(game.last_player, negative=False)
+                template = WIN_TEXT_TEMPLATE
+            elif board.state == 3:
+                reward = gen_reward(game.last_player, negative=True)
+                game.lives -= 1
+                if game.lives <= 0:
+                    template = LOSE_TEXT_TEMPLATE
+                else:
+                    game.stopped = False
+                    board.state = 1
+                    remain = game.lives
+                    ttl = game.ttl_lives
+                    template = STEP_TEXT_TEMPLATE
+            else:
+                # Should not reach here
+                reward = None
+            myreply = template.format(s_op=s_op, s_is=s_is, s_3bv=s_3bv, ops_count=ops_count,
+                                    ops_list=ops_list, last_player=last_player,
+                                    time=round(time_used, 4), timeouts=timeouts, reward=reward,
+                                    remain=remain, ttl=ttl)
+            try:
+                msg.reply_text(myreply, parse_mode="Markdown")
+            except TimedOutError:
+                logger.debug('timeout sending report for game {}'.format(bhash))
+            if game.stopped:
+                game_manager.remove(bhash)
+        elif mmap is None or (not array_equal(board.map, mmap)):
+            game.lock.release()
+            game.save_action(user, (row, col))
+            update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
+        else:
+            game.lock.release()
+    except:
+        try:
+            game.lock.release()
+        except RuntimeError:
+            pass
+        raise
 
 
 
