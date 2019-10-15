@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import numpy as np
-from random import randint
+from random import shuffle, choice
 from copy import deepcopy
 
 # 0 - 8: means 0-8 mines, not opened
@@ -58,18 +58,26 @@ class Board():
             return
         elif mines < 0:
             return
-        mines_1d = list(range(height * width))
-        # first_move should't be a mine
-        del mines_1d[get_index(width, first_move)]
-        mines_index = list()
+        # first_move should't be a mine, and if possible, it should be an open.
         self.map = np.zeros((height, width), dtype=np.int8)
-        for i in range(mines):
-            index = randint(1, len(mines_1d)) - 1
-            mines_index.append(mines_1d[index])
-            del mines_1d[index]
-        for mine_index in mines_index:
-            (row, col) = get_row_col(width, mine_index)
-            self.map[row][col] = IS_MINE
+        map_1d = [IS_MINE] * mines
+        zero_blocks = list()
+        fm_index = get_index(width, first_move)
+        zero_blocks.append(fm_index)
+        fm_nbrs = [rc for rc in self.__iter_neighbour(*first_move)]
+        if height * width - mines - 1 >= len(fm_nbrs):
+            fm_nbrs_index = [get_index(width, fm_nbr) for fm_nbr in fm_nbrs]
+            zero_blocks += fm_nbrs_index
+            map_1d += [0] * (height * width - mines - 1 - len(fm_nbrs))
+        else:
+            map_1d += [0] * (height * width - mines - 1)
+        shuffle(map_1d)
+        for mindex in sorted(zero_blocks):
+            map_1d.insert(mindex, 0)
+        for mindex in range(len(map_1d)):
+            if map_1d[mindex] == IS_MINE:
+                (row, col) = get_row_col(width, mindex)
+                self.map[row][col] = IS_MINE
         for row in range(height):
             for col in range(width):
                 if self.map[row][col] != IS_MINE:
