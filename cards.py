@@ -271,7 +271,7 @@ def dist_cards_btn_click(update, context):
             rp[1] -= 1
             (cards, damount) = rp
             fplayer = get_player(int(user.id))
-            fplayer.immunity_cards += cards
+            fplayer.immunity_cards += got_cards
             fplayer.save()
             update.callback_query.answer(text=f"你得到了{got_cards}张卡", show_alert=False)
             if cards > 0 and damount > 0:
