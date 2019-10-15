@@ -6,9 +6,10 @@ from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, run_async
 from telegram.error import TimedOut as TimedOutError
 from numpy import array_equal
-# If no peewee orm is installed, try `from data_ram import get_player`
-from data import get_player
-from random import randint, choice
+# If no peewee orm is installed, try `from data_ram import get_player, db`
+from data import get_player, db
+from random import randint, choice, randrange
+from math import log
 from threading import Lock
 import time
 import logging
@@ -17,7 +18,7 @@ logging.basicConfig(level=logging.INFO,format='%(asctime)s - %(name)s - %(leveln
 logger = logging.getLogger(__name__)
 
 token = "token_here"
-updater = Updater(token, workers=8)
+updater = Updater(token, workers=8, use_context=True)
 job_queue = updater.job_queue
 job_queue.start()
 
@@ -29,8 +30,9 @@ WIDTH = 8
 MINES = 9
 
 UNOPENED_CELL = "\u2588"
-FLAGGED_CELL = "\u259a"
-STEPPED_CELL = "*"
+FLAGGED_CELL = "\U0001f6a9"
+#FLAGGED_CELL = "\u259a"
+STEPPED_CELL = "\u2622"
 
 WIN_TEXT_TEMPLATE = "哇所有奇怪的地方都被你打开啦…好羞羞\n" \
                     "地图：Op {s_op} / Is {s_is} / 3bv {s_3bv}\n操作总数 {ops_count}\n" \
@@ -132,13 +134,16 @@ game_manager = GameManager()
 
 
 @run_async
-def send_keyboard(bot, update, args):
+def send_keyboard(update, context):
+    (bot, args) = (context.bot, context.args)
     msg = update.message
     logger.info("Mine from {0}".format(update.message.from_user.id))
     if check_restriction(update.message.from_user):
         update.message.reply_text("爆炸这么多次还想扫雷？")
         return
     # create a game board
+    if args is None:
+        args = list()
     if len(args) == 3:
         height = HEIGHT
         width = WIDTH
@@ -182,64 +187,74 @@ def send_keyboard(bot, update, args):
     bot.send_message(chat_id=msg.chat.id, text="路过的大爷～来扫个雷嘛～", reply_to_message_id=msg.message_id,
                      parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
-def send_help(bot, update):
+def send_help(update, context):
     logger.debug("Start from {0}".format(update.message.from_user.id))
     msg = update.message
     msg.reply_text("这是一个扫雷bot\n\n/mine 开始新游戏")
 
-def send_source(bot, update):
+def send_source(update, context):
     logger.debug("Source from {0}".format(update.message.from_user.id))
     update.message.reply_text('Source code: https://git.jerryxiao.cc/Jerry/tgmsbot')
 
-def send_status(bot, update):
+def send_status(update, context):
     logger.info("Status from {0}".format(update.message.from_user.id))
     count = game_manager.count()
     update.message.reply_text('当前进行的游戏: {}'.format(count))
 
 def gen_reward(user, negative=True):
     ''' Reward the player :) '''
+    def __chance(percentage):
+        if randrange(0,10000)/10000 < percentage:
+            return True
+        else:
+            return False
+    def __floating(value):
+        return randrange(8000,12000)/10000 * value
+    def __lose_cards(cardnum):
+        if cardnum <= 6:
+            return 1
+        else:
+            return int(__floating(log(cardnum, 2)))
+    def __get_cards(cardnum):
+        if cardnum >= 2:
+            cards = __floating(1 / log(cardnum, 100))
+            if cards > 1.0:
+                return int(cards)
+            else:
+                return int(__chance(cards))
+        else:
+            return int(__floating(8.0))
     # Negative rewards
     def restrict_mining(player):
-        if player.immunity_cards >= 1:
-            if player.immunity_cards >= 10:
-                lost_cards = randint(2,4)
-            elif player.immunity_cards >= 5:
-                lost_cards = randint(1,3)
-            else:
-                lost_cards = 1
-            player.immunity_cards -= lost_cards
+        lost_cards = __lose_cards(player.immunity_cards)
+        player.immunity_cards -= lost_cards
+        if player.immunity_cards >= 0:
             ret = "用去{}张免疫卡，还剩{}张".format(lost_cards, player.immunity_cards)
         else:
             now = int(time.time())
             seconds = randint(30, 120)
             player.restricted_until = now + seconds
             ret = "没有免疫卡了，被限制扫雷{}秒".format(seconds)
-        player.save()
         return ret
     # Positive rewards
     def give_immunity_cards(player):
-        rewarded_cards = 0
-        if player.immunity_cards <= 3:
-            rewarded_cards = randint(1, 2)
-        elif player.immunity_cards <= 10:
-            if randint(1, 5) == 5:
-                rewarded_cards = 1
-        elif randint(1, 10) == 10:
-            rewarded_cards = 1
+        rewarded_cards = __get_cards(player.immunity_cards)
         player.immunity_cards += rewarded_cards
-        player.save()
         if rewarded_cards == 0:
             return "共有{}张免疫卡".format(player.immunity_cards)
         else:
             return "被奖励了{}张免疫卡，共有{}张".format(rewarded_cards, player.immunity_cards)
 
     player = get_player(user.id)
-    if negative:
-        player.death += 1
-        return restrict_mining(player)
-    else:
-        player.wins += 1
-        return give_immunity_cards(player)
+    try:
+        if negative:
+            player.death += 1
+            return restrict_mining(player)
+        else:
+            player.wins += 1
+            return give_immunity_cards(player)
+    finally:
+        player.save()
 
 def game_count(user):
     player = get_player(user.id)
@@ -248,7 +263,6 @@ def game_count(user):
 
 def check_restriction(user):
     player = get_player(user.id)
-    player.db_close()
     now = int(time.time())
     if now >= player.restricted_until:
         return False
@@ -256,11 +270,10 @@ def check_restriction(user):
         return player.restricted_until - now
 
 @run_async
-def player_statistics(bot, update):
+def player_statistics(update, context):
     logger.info("Statistics from {0}".format(update.message.from_user.id))
     user = update.message.from_user
     player = get_player(user.id)
-    player.db_close()
     mines = player.mines
     death = player.death
     wins = player.wins
@@ -271,7 +284,7 @@ def player_statistics(bot, update):
                                               wins=wins, cards=cards))
 
 
-def update_keyboard_request(bot, bhash, game, chat_id, message_id):
+def update_keyboard_request(context, bhash, game, chat_id, message_id):
     current_action_timestamp = time.time()
     if current_action_timestamp - game.last_action <= KBD_MIN_INTERVAL:
         logger.debug('Rate limit triggered.')
@@ -280,8 +293,9 @@ def update_keyboard_request(bot, bhash, game, chat_id, message_id):
                            context=(bhash, game, chat_id, message_id, current_action_timestamp))
     else:
         game.last_action = current_action_timestamp
-        update_keyboard(bot, None, noqueue=(bhash, game, chat_id, message_id))
-def update_keyboard(bot, job, noqueue=None):
+        update_keyboard(context, noqueue=(bhash, game, chat_id, message_id))
+def update_keyboard(context, noqueue=None):
+    (bot, job) = (context.bot, context.job)
     if noqueue:
         (bhash, game, chat_id, message_id) = noqueue
     else:
@@ -317,7 +331,8 @@ def update_keyboard(bot, job, noqueue=None):
         game.timeouts += 1
 
 @run_async
-def handle_button_click(bot, update):
+def handle_button_click(update, context):
+    bot = context.bot
     msg = update.callback_query.message
     user = update.callback_query.from_user
     chat_id = update.callback_query.message.chat.id
@@ -340,10 +355,10 @@ def handle_button_click(bot, update):
     if game is None:
         logger.debug("No game found for hash {}".format(bhash))
         return
-    game.lock.acquire()
     try:
         if game.stopped:
             return
+        game.lock.acquire()
         board = game.board
         if board.state == 0:
             mmap = None
@@ -355,7 +370,7 @@ def handle_button_click(bot, update):
             game.lock.release()
             game.save_action(user, (row, col))
             if not array_equal(board.map, mmap):
-                update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
+                update_keyboard_request(context, bhash, game, chat_id, msg.message_id)
             (s_op, s_is, s_3bv) = board.gen_statistics()
             ops_count = game.actions_sum()
             ops_list = game.get_actions()
@@ -394,7 +409,7 @@ def handle_button_click(bot, update):
         elif mmap is None or (not array_equal(board.map, mmap)):
             game.lock.release()
             game.save_action(user, (row, col))
-            update_keyboard_request(bot, bhash, game, chat_id, msg.message_id)
+            update_keyboard_request(context, bhash, game, chat_id, msg.message_id)
         else:
             game.lock.release()
     except:
@@ -405,12 +420,25 @@ def handle_button_click(bot, update):
         raise
 
 
+from cards import getperm, setperm, lvlup, transfer_cards, rob_cards, cards_lottery, dist_cards, dist_cards_btn_click
+updater.dispatcher.add_handler(CommandHandler('getlvl', getperm))
+updater.dispatcher.add_handler(CommandHandler('setlvl', setperm))
+updater.dispatcher.add_handler(CommandHandler('lvlup', lvlup))
+updater.dispatcher.add_handler(CommandHandler('transfer', transfer_cards))
+updater.dispatcher.add_handler(CommandHandler('rob', rob_cards))
+updater.dispatcher.add_handler(CommandHandler('lottery', cards_lottery))
+updater.dispatcher.add_handler(CommandHandler('dist', dist_cards))
+updater.dispatcher.add_handler(CallbackQueryHandler(dist_cards_btn_click, pattern=r'dist'))
+
 
 updater.dispatcher.add_handler(CommandHandler('start', send_help))
-updater.dispatcher.add_handler(CommandHandler('mine', send_keyboard, pass_args=True))
+updater.dispatcher.add_handler(CommandHandler('mine', send_keyboard))
 updater.dispatcher.add_handler(CommandHandler('status', send_status))
 updater.dispatcher.add_handler(CommandHandler('stats', player_statistics))
 updater.dispatcher.add_handler(CommandHandler('source', send_source))
 updater.dispatcher.add_handler(CallbackQueryHandler(handle_button_click))
-updater.start_polling()
-updater.idle()
+try:
+    updater.start_polling()
+    updater.idle()
+finally:
+    db.close()
