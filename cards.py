@@ -222,6 +222,7 @@ def cards_lottery(update, context):
     cards = int(cards) if cards > 1 else 1
     cards *= randrange(-1, 2, 2)
     fplayer.immunity_cards += cards
+    fplayer.save()
     update.message.reply_text(f'您{"获得" if cards >= 0 else "血亏"}了{abs(cards)}张卡')
 
 @run_async
