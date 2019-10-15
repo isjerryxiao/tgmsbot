@@ -149,7 +149,7 @@ def transfer_cards(update, context):
                 tplayer.immunity_cards += amount
                 fplayer.save()
                 tplayer.save()
-                update.message.reply_text(f'{display_username(from_user)} 转给了 {display_username(from_user)} {amount}张卡',
+                update.message.reply_text(f'{display_username(from_user)} 转给了 {display_username(reply_to_user)} {amount}张卡',
                                           parse_mode="Markdown")
             else:
                 update.message.reply_text(f'转账失败，你可能没有这么多卡哦({fplayer.immunity_cards}/{amount})',
