@@ -257,9 +257,9 @@ def dist_cards_btn_click(update, context):
     data = update.callback_query.data
     user = update.callback_query.from_user
     omsg = update.callback_query.message
+    red_packets = context.chat_data.setdefault('red_packets', dict())
     try:
         (_, rphash) = data.split(' ')
-        red_packets = context.chat_data.setdefault('red_packets', dict())
         rp = red_packets.get(str(rphash), None)
         if rp:
             (cards, damount) = [int(a) for a in rp]
@@ -268,7 +268,7 @@ def dist_cards_btn_click(update, context):
                 return randrange(5000,15000)/10000 * value
             got_cards = int(__floating(cards/damount))
             got_cards = got_cards if got_cards <= cards else cards
-            got_cards = 1 if randrange(0,10000)/10000 < 0.2 and got_cards == 0 else got_cards
+            got_cards = 1 if got_cards == 0 and randrange(0,10000)/10000 < 0.2 else got_cards
             got_cards = got_cards if damount != 1 else cards
             rp[0] -= got_cards
             rp[1] -= 1
@@ -289,4 +289,14 @@ def dist_cards_btn_click(update, context):
             update.callback_query.answer()
         except Exception:
             pass
-        omsg.edit_text(omsg.text_markdown + "褪裙了", parse_mode="Markdown", reply_markup=None)
+        def free_mem(job_context):
+            try:
+                red_packets.pop(rphash)
+            except KeyError:
+                pass
+        if rphash:
+            rp = red_packets.get(rphash, [0, 0])
+            if rp[0] != -1:
+                rp[0] = -1
+                omsg.edit_text(omsg.text_markdown + "褪裙了", parse_mode="Markdown", reply_markup=None)
+                context.job_queue.run_once(free_mem, 5)
