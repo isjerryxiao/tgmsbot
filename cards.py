@@ -268,6 +268,7 @@ def dist_cards_btn_click(update, context):
                 return randrange(5000,15000)/10000 * value
             got_cards = int(__floating(cards/damount))
             got_cards = got_cards if got_cards <= cards else cards
+            got_cards = 1 if randrange(0,10000)/10000 < 0.2 and got_cards == 0 else got_cards
             got_cards = got_cards if damount != 1 else cards
             rp[0] -= got_cards
             rp[1] -= 1
