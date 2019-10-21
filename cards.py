@@ -53,7 +53,8 @@ def getperm(update, context):
     else:
         tuser = from_user
     tplayer = get_player(int(tuser.id))
-    update.message.reply_text(f"{display_username(tuser)} 等级为 {tplayer.permission}",
+    update.message.reply_text((f"{display_username(tuser)} 等级为 {tplayer.permission}\n"
+                               f"口袋里有 {tplayer.immunity_cards} 张免疫卡"),
                               parse_mode="Markdown")
 
 @run_async
@@ -235,6 +236,7 @@ def dist_cards(update, context):
             (cards, damount) = [int(a) for a in context.args]
             assert (cards > 0 and damount > 0)
             fplayer = get_player(int(from_user.id))
+            assert fplayer.immunity_cards >= cards
             fplayer.immunity_cards -= cards
             fplayer.save()
             red_packets = context.chat_data.setdefault('red_packets', dict())

@@ -152,7 +152,7 @@ class Board():
         self.__open(row, col)
 
     def gen_statistics(self):
-        if self.__op != 0:
+        if self.__3bv != 0:
             return (self.__op, self.__is, self.__3bv)
         self.__visited = np.zeros((self.height, self.width), dtype=np.int8)
         def scan_open(row, col):
