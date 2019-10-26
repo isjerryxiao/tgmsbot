@@ -31,8 +31,9 @@ MINES = 9
 
 UNOPENED_CELL = "\u2588"
 FLAGGED_CELL = "\U0001f6a9"
-#FLAGGED_CELL = "\u259a"
 STEPPED_CELL = "\u2622"
+NUM_CELL_0 = "\u2800"
+NUM_CELL_ORD = ord("\uff11") - 1
 
 WIN_TEXT_TEMPLATE = "哇所有奇怪的地方都被你打开啦…好羞羞\n" \
                     "地图：Op {s_op} / Is {s_is} / 3bv {s_3bv}\n操作总数 {ops_count}\n" \
@@ -311,13 +312,13 @@ def update_keyboard(context, noqueue=None):
                 if board.map[row][col] <= 9:
                     cell_text = UNOPENED_CELL
                 elif board.map[row][col] == 10:
-                    cell_text = " "
+                    cell_text = NUM_CELL_0
                 elif board.map[row][col] == 19:
                     cell_text = FLAGGED_CELL
                 elif board.map[row][col] == 20:
                     cell_text = STEPPED_CELL
                 else:
-                    cell_text = str(board.map[row][col] - 10)
+                    cell_text = chr(NUM_CELL_ORD + board.map[row][col] - 10)
                 cell = InlineKeyboardButton(text=cell_text, callback_data="{} {} {}".format(bhash, row, col))
                 current_row.append(cell)
             keyboard.append(current_row)
