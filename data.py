@@ -2,18 +2,41 @@
 # -*- coding: utf-8 -*-
 from peewee import *
 
+SQLITE_MAX_INT: int = 2**63 -1
+SQLITE_MIN_INT: int = -2**63
+SQLITE_MAX_INT = int(SQLITE_MAX_INT/2)
+SQLITE_MIN_INT = int(SQLITE_MIN_INT/2)
+
 db = SqliteDatabase('tgmsbot.db', pragmas={
     'journal_mode': 'wal',
     'cache_size': -32 * 1000})
 
+class SafeIntegerField(IntegerField):
+    field_type = 'INT'
+
+    def adapt(self, value):
+        try:
+            ivalue = int(value)
+            if ivalue > SQLITE_MAX_INT:
+                rvalue = SQLITE_MAX_INT
+            elif ivalue < SQLITE_MIN_INT:
+                rvalue = SQLITE_MIN_INT
+            else:
+                rvalue = value
+            return rvalue
+        except ValueError:
+            return value
+
+
 class Player(Model):
-    user_id = IntegerField(unique=True, primary_key=True)
-    mines = IntegerField()
-    death = IntegerField()
-    wins = IntegerField()
-    restricted_until = IntegerField()
-    immunity_cards = IntegerField()
-    permission = IntegerField()
+    user_id = SafeIntegerField(unique=True, primary_key=True)
+    mines = SafeIntegerField()
+    death = SafeIntegerField()
+    wins = SafeIntegerField()
+    restricted_until = SafeIntegerField()
+    immunity_cards = SafeIntegerField()
+    permission = SafeIntegerField()
+
     class Meta:
         database = db
 
