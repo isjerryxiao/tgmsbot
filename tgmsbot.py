@@ -15,7 +15,7 @@ import time
 import logging
 
 logging.basicConfig(level=logging.INFO,format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('tgmsbot')
 
 token = "token_here"
 updater = Updater(token, workers=8, use_context=True)

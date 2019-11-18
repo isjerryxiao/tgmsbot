@@ -6,6 +6,9 @@ from telegram.ext import run_async
 from data import get_player
 from random import randrange
 from time import time
+import logging
+
+logger = logging.getLogger('tgmsbot.cards')
 
 MAX_LEVEL: int = 100
 MID_LEVEL: int = 80
@@ -45,6 +48,7 @@ def _msg_users(update):
 
 @run_async
 def getperm(update, context):
+    logging.info(f'getperm from {getattr(update.effective_user, "id", None)}')
     (from_user, reply_to_user) = _msg_users(update)
     if not from_user:
         return
@@ -59,6 +63,7 @@ def getperm(update, context):
 
 @run_async
 def setperm(update, context):
+    logging.info(f'setperm from {getattr(update.effective_user, "id", None)}')
     (from_user, reply_to_user) = _msg_users(update)
     if not from_user:
         return
@@ -87,39 +92,64 @@ def lvlup(update, context):
     '''
         use LVL_UP_CARDS cards to level up 1 lvl
     '''
+    logging.info(f'lvlup from {getattr(update.effective_user, "id", None)}')
+    LVLUP_TIMEOUT = 10
+    last_time = context.user_data.setdefault('lvlup_time', 0.0)
+    ctime = time()
+    if ctime - last_time < LVLUP_TIMEOUT:
+        update.message.reply_text('别急，你不是刚刚才来过吗\nTips: /lvlup n 可以一次升n级哦')
+        return
+    else:
+        context.user_data['lvlup_time'] = ctime
     (from_user, reply_to_user) = _msg_users(update)
+    if context.args and len(context.args) == 1:
+        try:
+            amount = int(context.args[0])
+        except ValueError:
+            update.message.reply_text('数字不合法')
+            return
+    else:
+        amount = 1
     if not from_user:
         return
     if reply_to_user:
         fplayer = get_player(int(from_user.id))
         tplayer = get_player(int(reply_to_user.id))
-        if fplayer.immunity_cards >= LVL_UP_CARDS:
-            fplayer.immunity_cards -= LVL_UP_CARDS
-            if tplayer.permission <= MAX_LEVEL - 2 or tplayer.permission >= MAX_LEVEL:
-                tplayer.permission += 1
+        amount = abs(amount)
+        if fplayer.immunity_cards >= (used_cards := LVL_UP_CARDS * amount):
+            fplayer.immunity_cards -= used_cards
+            tplayer.permission = MAX_LEVEL - 1 if (_tpp := tplayer.permission + amount) >= MAX_LEVEL - 1 \
+                                                  and tplayer.permission < MAX_LEVEL else _tpp
             fplayer.save()
             tplayer.save()
-            update.message.reply_text((f"{display_username(from_user)} 消耗了{LVL_UP_CARDS}张免疫卡，"
-                                       f"为 {display_username(reply_to_user)} 升了1级"),
+            update.message.reply_text((f"{display_username(from_user)} 消耗了{used_cards}张免疫卡，"
+                                       f"为 {display_username(reply_to_user)} 升了{amount}级"),
                                        parse_mode="Markdown")
         else:
-            update.message.reply_text(f"您的免疫卡不足({fplayer.immunity_cards})，{LVL_UP_CARDS}张免疫卡兑换1等级",
+            update.message.reply_text(f"您的免疫卡不足({fplayer.immunity_cards})，{used_cards}张免疫卡兑换{amount}等级",
                                       parse_mode="Markdown")
     else:
         fplayer = get_player(int(from_user.id))
-        if fplayer.immunity_cards >= LVL_UP_CARDS:
-            fplayer.immunity_cards -= LVL_UP_CARDS
-            if fplayer.permission <= MAX_LEVEL - 2 or fplayer.permission >= MAX_LEVEL:
-                fplayer.permission += 1
+        if fplayer.immunity_cards >= (used_cards := LVL_UP_CARDS * amount):
+            if amount < 0:
+                if fplayer.permission + amount >= 0:
+                    fplayer.immunity_cards += abs(used_cards)
+                else:
+                    fplayer.immunity_cards += LVL_UP_CARDS * fplayer.permission
+            else:
+                fplayer.immunity_cards -= abs(used_cards)
+            fplayer.permission = MAX_LEVEL - 1 if (_fpp := fplayer.permission + amount) >= MAX_LEVEL - 1 \
+                                                  and fplayer.permission < MAX_LEVEL else _fpp
             fplayer.save()
-            update.message.reply_text((f"{display_username(from_user)} 消耗了{LVL_UP_CARDS}张免疫卡，"
-                                        "为 自己 升了1级"), parse_mode="Markdown")
+            update.message.reply_text((f"{display_username(from_user)} 消耗了{used_cards}张免疫卡，"
+                                       f"为 自己 升了{amount}级"), parse_mode="Markdown")
         else:
-            update.message.reply_text(f"您的免疫卡不足({fplayer.immunity_cards})，{LVL_UP_CARDS}张免疫卡兑换1等级",
+            update.message.reply_text(f"您的免疫卡不足({fplayer.immunity_cards})，{used_cards}张免疫卡兑换{amount}等级",
                                       parse_mode="Markdown")
 
 @run_async
 def transfer_cards(update, context):
+    logging.info(f'transfer_cards from {getattr(update.effective_user, "id", None)}')
     (from_user, reply_to_user) = _msg_users(update)
     if not from_user:
         return
@@ -160,6 +190,7 @@ def transfer_cards(update, context):
 
 @run_async
 def rob_cards(update, context):
+    logging.info(f'rob_cards from {getattr(update.effective_user, "id", None)}')
     ROB_TIMEOUT = 10
     last_time = context.user_data.setdefault('rob_time', 0.0)
     ctime = time()
@@ -225,6 +256,7 @@ def rob_cards(update, context):
 
 @run_async
 def cards_lottery(update, context):
+    logging.info(f'cards_lottery from {getattr(update.effective_user, "id", None)}')
     LOTTERY_TIMEOUT = 10
     last_time = context.user_data.setdefault('lottery_time', 0.0)
     ctime = time()
@@ -249,6 +281,7 @@ def cards_lottery(update, context):
 
 @run_async
 def dist_cards(update, context):
+    logging.info(f'dist_cards from {getattr(update.effective_user, "id", None)}')
     (from_user, _) = _msg_users(update)
     if not from_user:
         return
@@ -275,6 +308,7 @@ def dist_cards(update, context):
 
 @run_async
 def dist_cards_btn_click(update, context):
+    logging.info(f'dist_cards_btn_click from {getattr(update.effective_user, "id", None)}')
     data = update.callback_query.data
     user = update.callback_query.from_user
     omsg = update.callback_query.message
