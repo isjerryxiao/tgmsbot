@@ -189,16 +189,37 @@ def rob_cards(update, context):
                     return True
                 else:
                     return False
-            if __chance(success_chance):
-                msg_text = "抢劫成功，获得"
+            MSG_TEXT_SUCCESS = "抢劫成功，获得"
+            MSG_TEXT_FAIL = "抢劫失败，反被抢走"
+            if _fp >= MID_LEVEL and _tp >= MID_LEVEL:
+                cards_amount = int(max(abs(fplayer.immunity_cards), abs(tplayer.immunity_cards)) * randrange(1000,8000)/10000)
+                lvl_amount = int(max(_fp, _tp) * randrange(1000,8000)/10000)
+                if (_tple if (_fp < MAX_LEVEL) ^ (_tple := _tp < MAX_LEVEL) else __chance(success_chance)):
+                    msg_text = MSG_TEXT_SUCCESS
+                else:
+                    msg_text = MSG_TEXT_FAIL
+                    cards_amount = -cards_amount
+                    lvl_amount = -lvl_amount
+                fplayer.immunity_cards += cards_amount
+                tplayer.immunity_cards -= cards_amount
+                fplayer.permission = _fpp if (_fpp := _fp + lvl_amount) < MAX_LEVEL or _fp >= MAX_LEVEL else MAX_LEVEL - 1
+                tplayer.permission = _tpp if (_tpp := _tp - lvl_amount) < MAX_LEVEL or _tp >= MAX_LEVEL else MAX_LEVEL - 1
+                fplayer.save()
+                tplayer.save()
+                update.message.reply_text((f'{display_username(from_user)} {msg_text}{abs(cards_amount)}张卡, '
+                                           f'{abs(lvl_amount)}级'),
+                                          parse_mode="Markdown")
             else:
-                msg_text = "抢劫失败，反被抢走"
-                amount = -amount
-            fplayer.immunity_cards += amount
-            tplayer.immunity_cards -= amount
-            fplayer.save()
-            tplayer.save()
-            update.message.reply_text(f'{display_username(from_user)} {msg_text}{abs(amount)}张卡', parse_mode="Markdown")
+                if __chance(success_chance):
+                    msg_text = MSG_TEXT_SUCCESS
+                else:
+                    msg_text = MSG_TEXT_FAIL
+                    amount = -amount
+                fplayer.immunity_cards += amount
+                tplayer.immunity_cards -= amount
+                fplayer.save()
+                tplayer.save()
+                update.message.reply_text(f'{display_username(from_user)} {msg_text}{abs(amount)}张卡', parse_mode="Markdown")
     else:
         update.message.reply_text('请回复被操作人')
 
