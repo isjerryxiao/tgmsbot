@@ -3,12 +3,15 @@
 
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import run_async
-from data import get_player
 from random import randrange
 from time import time
-import logging
 
+import logging
 logger = logging.getLogger('tgmsbot.cards')
+
+# from the main module
+get_player = lambda *args, **kwargs: None
+game_manager = None
 
 MAX_LEVEL: int = 100
 MID_LEVEL: int = 80
@@ -48,7 +51,7 @@ def _msg_users(update):
 
 @run_async
 def getperm(update, context):
-    logging.info(f'getperm from {getattr(update.effective_user, "id", None)}')
+    logger.info(f'getperm from {getattr(update.effective_user, "id", None)}')
     (from_user, reply_to_user) = _msg_users(update)
     if not from_user:
         return
@@ -63,7 +66,7 @@ def getperm(update, context):
 
 @run_async
 def setperm(update, context):
-    logging.info(f'setperm from {getattr(update.effective_user, "id", None)}')
+    logger.info(f'setperm from {getattr(update.effective_user, "id", None)}')
     (from_user, reply_to_user) = _msg_users(update)
     if not from_user:
         return
@@ -92,7 +95,7 @@ def lvlup(update, context):
     '''
         use LVL_UP_CARDS cards to level up 1 lvl
     '''
-    logging.info(f'lvlup from {getattr(update.effective_user, "id", None)}')
+    logger.info(f'lvlup from {getattr(update.effective_user, "id", None)}')
     LVLUP_TIMEOUT = 10
     last_time = context.user_data.setdefault('lvlup_time', 0.0)
     ctime = time()
@@ -149,7 +152,7 @@ def lvlup(update, context):
 
 @run_async
 def transfer_cards(update, context):
-    logging.info(f'transfer_cards from {getattr(update.effective_user, "id", None)}')
+    logger.info(f'transfer_cards from {getattr(update.effective_user, "id", None)}')
     (from_user, reply_to_user) = _msg_users(update)
     if not from_user:
         return
@@ -190,7 +193,7 @@ def transfer_cards(update, context):
 
 @run_async
 def rob_cards(update, context):
-    logging.info(f'rob_cards from {getattr(update.effective_user, "id", None)}')
+    logger.info(f'rob_cards from {getattr(update.effective_user, "id", None)}')
     ROB_TIMEOUT = 10
     last_time = context.user_data.setdefault('rob_time', 0.0)
     ctime = time()
@@ -256,7 +259,7 @@ def rob_cards(update, context):
 
 @run_async
 def cards_lottery(update, context):
-    logging.info(f'cards_lottery from {getattr(update.effective_user, "id", None)}')
+    logger.info(f'cards_lottery from {getattr(update.effective_user, "id", None)}')
     LOTTERY_TIMEOUT = 10
     last_time = context.user_data.setdefault('lottery_time', 0.0)
     ctime = time()
@@ -281,7 +284,7 @@ def cards_lottery(update, context):
 
 @run_async
 def dist_cards(update, context):
-    logging.info(f'dist_cards from {getattr(update.effective_user, "id", None)}')
+    logger.info(f'dist_cards from {getattr(update.effective_user, "id", None)}')
     (from_user, _) = _msg_users(update)
     if not from_user:
         return
@@ -308,7 +311,7 @@ def dist_cards(update, context):
 
 @run_async
 def dist_cards_btn_click(update, context):
-    logging.info(f'dist_cards_btn_click from {getattr(update.effective_user, "id", None)}')
+    logger.info(f'dist_cards_btn_click from {getattr(update.effective_user, "id", None)}')
     data = update.callback_query.data
     user = update.callback_query.from_user
     omsg = update.callback_query.message
@@ -355,3 +358,62 @@ def dist_cards_btn_click(update, context):
                 rp[0] = -1
                 omsg.edit_text(omsg.text_markdown + "褪裙了", parse_mode="Markdown", reply_markup=None)
                 context.job_queue.run_once(free_mem, 5)
+
+@run_async
+def reveal(update, context):
+    logger.info(f'reveal from {getattr(update.effective_user, "id", None)}')
+    (from_user, _) = _msg_users(update)
+    if not from_user:
+        return
+    if (msg := update.effective_message) and (rmsg := msg.reply_to_message):
+        try:
+            assert (rmarkup := rmsg.reply_markup) and (kbd := rmarkup.inline_keyboard) \
+                and type((btn := kbd[0][0])) is InlineKeyboardButton and (data := btn.callback_data)
+            data = data.split(' ')
+            data = [int(i) for i in data]
+            (bhash, _, _) = data
+        except:
+            msg.reply_text('不是一条有效的消息')
+            return
+        game = game_manager.get_game_from_hash(bhash)
+        if not game:
+            msg.reply_text('这局似乎走丢了呢')
+            return
+        if (mmap := game.board.mmap) is None:
+            msg.reply_text('这局似乎还没开始呢')
+            return
+        def map_to_msg():
+            ZERO_CELL = '\u23f9'
+            MINE_CELL = '\u2622'
+            NUM_CELL_SUFFIX = '\ufe0f\u20e3'
+            BAD_CELL = "\U0001f21a\ufe0f"
+            msg_text = ""
+            for row in mmap:
+                for cell in row:
+                    if cell == 0:
+                        msg_text += ZERO_CELL
+                    elif cell == 9:
+                        msg_text += MINE_CELL
+                    elif cell in range(1,9):
+                        msg_text += str(cell) + NUM_CELL_SUFFIX
+                    else:
+                        msg_text += BAD_CELL
+                msg_text += '\n'
+            return msg_text
+        fplayer = get_player(int(from_user.id))
+        cards = abs(fplayer.immunity_cards) / 3
+        def __floating(value):
+            return randrange(5000,15000)/10000 * value
+        cards = __floating(cards)
+        cards = int(cards) if cards > 1 else 1
+        extra_text = ""
+        fplayer.immunity_cards -= cards
+        if fplayer.permission >= MID_LEVEL and fplayer.permission < MAX_LEVEL:
+            lvl = int(randrange(100,3000)/10000 * fplayer.permission)
+            lvl = lvl if lvl > 0 else 1
+            fplayer.permission -= lvl
+            extra_text = f", {lvl}级"
+        fplayer.save()
+        msg.reply_text(f'本局地图如下:\n\n{map_to_msg()}\n您用去了{cards}张卡{extra_text}')
+    else:
+        msg.reply_text('请回复想要查看的雷区')

@@ -12,6 +12,8 @@ from random import randint, choice, randrange
 from math import log
 from threading import Lock
 import time
+from pathlib import Path
+import pickle
 import logging
 
 logging.basicConfig(level=logging.INFO,format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -22,8 +24,11 @@ updater = Updater(token, workers=8, use_context=True)
 job_queue = updater.job_queue
 job_queue.start()
 
+PICKLE_FILE = 'tgmsbot.pickle'
+
 KBD_MIN_INTERVAL = 0.5
 KBD_DELAY_SECS = 0.5
+GARBAGE_COLLECTION_INTERVAL = 86400
 
 HEIGHT = 8
 WIDTH = 8
@@ -70,7 +75,7 @@ def display_username(user, atuser=True, shorten=False, markdown=True):
             name += " ({})".format(user.username)
     return name
 
-class Game():
+class Saved_Game():
     def __init__(self, board, group, creator, lives=1):
         self.board = board
         self.group = group
@@ -79,7 +84,6 @@ class Game():
         self.last_player = None
         self.start_time = time.time()
         self.stopped = False
-        self.lock = Lock()
         # timestamp of the last update keyboard action,
         # it is used to calculate time gap between
         # two actions and identify unique actions.
@@ -112,17 +116,44 @@ class Game():
             msg = "{}{} - {}项操作\n".format(msg, display_username(user), count)
         return msg
 
+class Game():
+    def __init__(self, *args, **kwargs):
+        if 'unpickle' in args:
+            assert len(args) == 2 and args[0] == 'unpickle'
+            self.__sg = args[1]
+        else:
+            self.__sg = Saved_Game(*args, **kwargs)
+        self.lock = Lock()
+    def pickle(self):
+        return self.__sg
+    def __getattr__(self, name):
+        return getattr(self.__sg, name, None)
+
 class GameManager:
-    __games = dict()
+    def __init__(self):
+        self.__games = dict()
+        self.__pf = Path(PICKLE_FILE)
+        if self.__pf.exists():
+            try:
+                with open(self.__pf, 'rb') as fhandle:
+                    saved_games = pickle.load(fhandle, fix_imports=True, errors="strict")
+                    self.__games = {bhash: Game('unpickle', saved_games[bhash]) for bhash in saved_games}
+            except Exception as err:
+                logger.error(f'Unable to load pickle file, {type(err).__name__}: {err}')
+        assert type(self.__games) is dict
+        for board_hash in self.__games:
+            self.__games[board_hash].lock = Lock()
     def append(self, board, board_hash, group_id, creator_id):
         lives = int(board.mines/3)
         if lives <= 0:
             lives = 1
         self.__games[board_hash] = Game(board, group_id, creator_id, lives=lives)
+        self.save_async()
     def remove(self, board_hash):
         board = self.get_game_from_hash(board_hash)
         if board:
-            del self.__games[board_hash]
+            self.__games.pop(board_hash)
+            self.save_async()
             return True
         else:
             return False
@@ -130,6 +161,30 @@ class GameManager:
         return self.__games.get(board_hash, None)
     def count(self):
         return len(self.__games)
+    @run_async
+    def save_async(self):
+        self.save()
+    def save(self):
+        try:
+            games_without_locks = {bhash: self.__games[bhash].pickle() for bhash in self.__games}
+            with open(self.__pf, 'wb') as fhandle:
+                pickle.dump(games_without_locks, fhandle, fix_imports=True)
+        except Exception as err:
+            logger.error(f'Unable to save pickle file, {type(err).__name__}: {err}')
+    def do_garbage_collection(self, context):
+        g_checked: int = 0
+        g_freed:   int = 0
+        games = self.__games
+        for board_hash in games:
+            g_checked += 1
+            gm = games[board_hash]
+            start_time = getattr(gm, 'start_time', 0.0)
+            if time.time() - start_time > 86400*10:
+                g_freed += 1
+                games.pop(board_hash)
+        self.save_async()
+        logger.info((f'Scheduled garbage collection checked {g_checked} games, '
+                     f'freed {g_freed} games.'))
 
 game_manager = GameManager()
 
@@ -421,15 +476,18 @@ def handle_button_click(update, context):
         raise
 
 
-from cards import getperm, setperm, lvlup, transfer_cards, rob_cards, cards_lottery, dist_cards, dist_cards_btn_click
-updater.dispatcher.add_handler(CommandHandler('getlvl', getperm))
-updater.dispatcher.add_handler(CommandHandler('setlvl', setperm))
-updater.dispatcher.add_handler(CommandHandler('lvlup', lvlup))
-updater.dispatcher.add_handler(CommandHandler('transfer', transfer_cards))
-updater.dispatcher.add_handler(CommandHandler('rob', rob_cards))
-updater.dispatcher.add_handler(CommandHandler('lottery', cards_lottery))
-updater.dispatcher.add_handler(CommandHandler('dist', dist_cards))
-updater.dispatcher.add_handler(CallbackQueryHandler(dist_cards_btn_click, pattern=r'dist'))
+import cards
+setattr(cards, 'get_player', get_player)
+setattr(cards, 'game_manager', game_manager)
+updater.dispatcher.add_handler(CommandHandler('getlvl', cards.getperm))
+updater.dispatcher.add_handler(CommandHandler('setlvl', cards.setperm))
+updater.dispatcher.add_handler(CommandHandler('lvlup', cards.lvlup))
+updater.dispatcher.add_handler(CommandHandler('transfer', cards.transfer_cards))
+updater.dispatcher.add_handler(CommandHandler('rob', cards.rob_cards))
+updater.dispatcher.add_handler(CommandHandler('lottery', cards.cards_lottery))
+updater.dispatcher.add_handler(CommandHandler('dist', cards.dist_cards))
+updater.dispatcher.add_handler(CommandHandler('reveal', cards.reveal))
+updater.dispatcher.add_handler(CallbackQueryHandler(cards.dist_cards_btn_click, pattern=r'dist'))
 
 
 updater.dispatcher.add_handler(CommandHandler('start', send_help))
@@ -438,8 +496,12 @@ updater.dispatcher.add_handler(CommandHandler('status', send_status))
 updater.dispatcher.add_handler(CommandHandler('stats', player_statistics))
 updater.dispatcher.add_handler(CommandHandler('source', send_source))
 updater.dispatcher.add_handler(CallbackQueryHandler(handle_button_click))
+updater.job_queue.run_repeating(game_manager.do_garbage_collection, GARBAGE_COLLECTION_INTERVAL, first=30)
 try:
     updater.start_polling()
     updater.idle()
 finally:
+    game_manager.save()
+    logger.info('Game_manager saved.')
     db.close()
+    logger.info('DB closed.')
