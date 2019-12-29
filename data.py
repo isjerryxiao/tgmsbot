@@ -4,8 +4,8 @@ from peewee import *
 
 SQLITE_MAX_INT: int = 2**63 -1
 SQLITE_MIN_INT: int = -2**63
-SQLITE_MAX_INT = int(SQLITE_MAX_INT/2)
-SQLITE_MIN_INT = int(SQLITE_MIN_INT/2)
+SQLITE_MAX_INT = SQLITE_MAX_INT // 2
+SQLITE_MIN_INT = SQLITE_MIN_INT // 2
 
 db = SqliteDatabase('tgmsbot.db', pragmas={
     'journal_mode': 'wal',

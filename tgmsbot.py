@@ -6,8 +6,6 @@ from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, run_async
 from telegram.error import TimedOut as TimedOutError
 from numpy import array_equal
-# If no peewee orm is installed, try `from data_ram import get_player, db`
-from data import get_player, db
 from random import randint, choice, randrange
 from math import log
 from threading import Lock
@@ -19,6 +17,12 @@ import logging
 logging.basicConfig(level=logging.INFO,format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tgmsbot')
 
+try:
+    from data import get_player, db
+except ModuleNotFoundError:
+    logger.warning('using data_ram instead of data')
+    from data_ram import get_player, db
+
 token = "token_here"
 updater = Updater(token, workers=8, use_context=True)
 job_queue = updater.job_queue
@@ -29,6 +33,7 @@ PICKLE_FILE = 'tgmsbot.pickle'
 KBD_MIN_INTERVAL = 0.5
 KBD_DELAY_SECS = 0.5
 GARBAGE_COLLECTION_INTERVAL = 86400
+MAX_GAMES_PER_USER = 10
 
 HEIGHT = 8
 WIDTH = 8
@@ -80,6 +85,7 @@ class Saved_Game():
         self.board = board
         self.group = group
         self.creator = creator
+        self.msgid = None
         self.__actions = dict()
         self.last_player = None
         self.start_time = time.time()
@@ -118,16 +124,22 @@ class Saved_Game():
 
 class Game():
     def __init__(self, *args, **kwargs):
+        self.__dict__['__sg'] = None
         if 'unpickle' in args:
             assert len(args) == 2 and args[0] == 'unpickle'
             self.__sg = args[1]
         else:
             self.__sg = Saved_Game(*args, **kwargs)
-        self.lock = Lock()
+        self.__dict__['lock'] = Lock()
     def pickle(self):
         return self.__sg
     def __getattr__(self, name):
         return getattr(self.__sg, name, None)
+    def __setattr__(self, name, val):
+        if name != '_Game__sg':
+            return setattr(self.__sg, name, val)
+        else:
+            self.__dict__[name] = val
 
 class GameManager:
     def __init__(self):
@@ -159,6 +171,14 @@ class GameManager:
             return False
     def get_game_from_hash(self, board_hash):
         return self.__games.get(board_hash, None)
+    def iter_game_from_user(self, user_id):
+        for g in self.__games.copy().values():
+            if g.creator.id == user_id:
+                yield g
+    def iter_game_from_chat(self, chat_id):
+        for g in self.__games.copy().values():
+            if g.group.id == chat_id:
+                yield g
     def count(self):
         return len(self.__games)
     @run_async
@@ -175,7 +195,7 @@ class GameManager:
         g_checked: int = 0
         g_freed:   int = 0
         games = self.__games
-        for board_hash in games:
+        for board_hash in games.copy():
             g_checked += 1
             gm = games[board_hash]
             start_time = getattr(gm, 'start_time', 0.0)
@@ -188,6 +208,31 @@ class GameManager:
 
 game_manager = GameManager()
 
+@run_async
+def list_games(update, context):
+    logger.info("List from {0}".format(update.message.from_user.id))
+    if not update.effective_chat or update.effective_chat.type in ('private', 'channel'):
+        if update.message:
+            update.message.reply_text('本功能仅在群聊中可用')
+        return
+    games_avail = list()
+    for (gid, gm) in enumerate(game_manager.iter_game_from_chat(update.effective_chat.id)):
+        if gid + 1 > 10:
+            break
+        elif gm.group and gm.creator and gm.msgid:
+            games_avail.append(gm)
+    if not games_avail:
+        update.message.reply_text("本群没有正在进行的游戏")
+        return
+    links = list()
+    def gen_link(chat, msgid, text):
+        chat = int(chat)
+        if chat < -1000000000000:
+            chat = (-chat) - 1000000000000
+        return f"[{text}](https://t.me/c/{chat}/{msgid})"
+    for gm in games_avail:
+        links.append(gen_link(gm.group.id, gm.msgid, f"{gm.creator.first_name} created on {time.ctime(gm.start_time)}"))
+    update.message.reply_text("\n".join(links), parse_mode="Markdown")
 
 @run_async
 def send_keyboard(update, context):
@@ -197,6 +242,11 @@ def send_keyboard(update, context):
     if check_restriction(update.message.from_user):
         update.message.reply_text("爆炸这么多次还想扫雷？")
         return
+    for (_gid, _) in enumerate(game_manager.iter_game_from_user(update.message.from_user.id)):
+        if _gid + 1 > MAX_GAMES_PER_USER:
+            update.message.reply_text((f"汝已经创建了超过{MAX_GAMES_PER_USER}个游戏了\n"
+                                        "请结束一个先前创建的游戏并继续"))
+            return
     # create a game board
     if args is None:
         args = list()
@@ -240,8 +290,9 @@ def send_keyboard(update, context):
             current_row.append(cell)
         keyboard.append(current_row)
     # send the keyboard
-    bot.send_message(chat_id=msg.chat.id, text="路过的大爷～来扫个雷嘛～", reply_to_message_id=msg.message_id,
-                     parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    gmsg = bot.send_message(chat_id=msg.chat.id, text="路过的大爷～来扫个雷嘛～", reply_to_message_id=msg.message_id,
+                            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    game_manager.get_game_from_hash(bhash).msgid = gmsg.message_id
 
 def send_help(update, context):
     logger.debug("Start from {0}".format(update.message.from_user.id))
@@ -491,6 +542,7 @@ updater.dispatcher.add_handler(CallbackQueryHandler(cards.dist_cards_btn_click, 
 
 
 updater.dispatcher.add_handler(CommandHandler('start', send_help))
+updater.dispatcher.add_handler(CommandHandler('list', list_games))
 updater.dispatcher.add_handler(CommandHandler('mine', send_keyboard))
 updater.dispatcher.add_handler(CommandHandler('status', send_status))
 updater.dispatcher.add_handler(CommandHandler('stats', player_statistics))

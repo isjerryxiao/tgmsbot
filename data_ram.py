@@ -16,6 +16,9 @@ class Player():
         self.restricted_until = restricted_until
         self.immunity_cards = immunity_cards
         self.permission = permission
+    @staticmethod
+    def save():
+        pass
 
 def get_player(user_id):
     player = pool.get(user_id, None)
