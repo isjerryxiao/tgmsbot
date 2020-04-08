@@ -4,7 +4,7 @@ from mscore import Board, check_params
 from copy import deepcopy
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, run_async
-from telegram.error import TimedOut as TimedOutError
+from telegram.error import TimedOut as TimedOutError, RetryAfter as RetryAfterError
 from numpy import array_equal
 from random import randint, choice, randrange
 from math import log
@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 import pickle
 import logging
+from traceback import format_exc
 
 logging.basicConfig(level=logging.INFO,format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tgmsbot')
@@ -80,7 +81,7 @@ def display_username(user, atuser=True, shorten=False, markdown=True):
             name += " ({})".format(user.username)
     return name
 
-class Saved_Game():
+class Saved_Game:
     def __init__(self, board, group, creator, lives=1):
         self.board = board
         self.group = group
@@ -122,24 +123,23 @@ class Saved_Game():
             msg = "{}{} - {}项操作\n".format(msg, display_username(user), count)
         return msg
 
-class Game():
+class Game:
     def __init__(self, *args, **kwargs):
-        self.__dict__['__sg'] = None
         if 'unpickle' in args:
             assert len(args) == 2 and args[0] == 'unpickle'
             self.__sg = args[1]
         else:
             self.__sg = Saved_Game(*args, **kwargs)
-        self.__dict__['lock'] = Lock()
+        self.lock = Lock()
     def pickle(self):
         return self.__sg
     def __getattr__(self, name):
-        return getattr(self.__sg, name, None)
+        return getattr(self.__sg, name)
     def __setattr__(self, name, val):
-        if name != '_Game__sg':
-            return setattr(self.__sg, name, val)
-        else:
+        if name in ('_Game__sg', 'lock'):
             self.__dict__[name] = val
+        else:
+            return setattr(self.__sg, name, val)
 
 class GameManager:
     def __init__(self):
@@ -174,6 +174,10 @@ class GameManager:
     def iter_game_from_user(self, user_id):
         for g in self.__games.copy().values():
             if g.creator.id == user_id:
+                yield g
+    def iter_all_open_game(self):
+        for g in self.__games.copy().values():
+            if g.group.type == 'supergroup':
                 yield g
     def iter_game_from_chat(self, chat_id):
         for g in self.__games.copy().values():
@@ -211,27 +215,41 @@ game_manager = GameManager()
 @run_async
 def list_games(update, context):
     logger.info("List from {0}".format(update.message.from_user.id))
-    if not update.effective_chat or update.effective_chat.type in ('private', 'channel'):
+    if (_is_open_all := context.args and context.args[0] in ('open', 'all')):
+        _iter_func = game_manager.iter_all_open_game
+        _iter_args = list()
+    else:
+        _iter_func = game_manager.iter_game_from_chat
+        _iter_args = [update.effective_chat.id,]
+    if not _is_open_all and (not update.effective_chat or update.effective_chat.type != 'supergroup'):
         if update.message:
-            update.message.reply_text('本功能仅在群聊中可用')
+            update.message.reply_text('本功能仅在超级群组中可用')
         return
     games_avail = list()
-    for (gid, gm) in enumerate(game_manager.iter_game_from_chat(update.effective_chat.id)):
-        if gid + 1 > 10:
+    for gm in _iter_func(*_iter_args):
+        if len(games_avail) >= 10:
             break
-        elif gm.group and gm.creator and gm.msgid:
+        elif gm.group and gm.group.type and gm.group.type == 'supergroup' and gm.creator and gm.msgid:
+            if context.args and context.args[0] == 'open' and not gm.group.username:
+                continue
             games_avail.append(gm)
     if not games_avail:
-        update.message.reply_text("本群没有正在进行的游戏")
+        if _is_open_all:
+            nrep_text = "没有找到符合条件的游戏"
+        else:
+            nrep_text = "本群没有正在进行的游戏\n试试 /list open 或 /list all"
+        update.message.reply_text(nrep_text)
         return
     links = list()
     def gen_link(chat, msgid, text):
-        chat = int(chat)
-        if chat < -1000000000000:
-            chat = (-chat) - 1000000000000
-        return f"[{text}](https://t.me/c/{chat}/{msgid})"
+        if chat.username:
+            return f"[{text}](https://t.me/{chat.username}/{msgid})"
+        chat_id = int(chat.id)
+        assert chat_id < -1000000000000
+        chat_id = (-chat_id) - 1000000000000
+        return f"[{text}](https://t.me/c/{chat_id}/{msgid})"
     for gm in games_avail:
-        links.append(gen_link(gm.group.id, gm.msgid, f"{gm.creator.first_name} created on {time.ctime(gm.start_time)}"))
+        links.append(gen_link(gm.group, gm.msgid, f"{gm.creator.first_name} created on {time.ctime(gm.start_time)}"))
     update.message.reply_text("\n".join(links), parse_mode="Markdown")
 
 @run_async
@@ -290,8 +308,12 @@ def send_keyboard(update, context):
             current_row.append(cell)
         keyboard.append(current_row)
     # send the keyboard
-    gmsg = bot.send_message(chat_id=msg.chat.id, text="路过的大爷～来扫个雷嘛～", reply_to_message_id=msg.message_id,
-                            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    try:
+        gmsg = bot.send_message(chat_id=msg.chat.id, text="路过的大爷～来扫个雷嘛～", reply_to_message_id=msg.message_id,
+                                parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        game_manager.remove(bhash)
+        raise
     game_manager.get_game_from_hash(bhash).msgid = gmsg.message_id
 
 def send_help(update, context):
@@ -433,9 +455,11 @@ def update_keyboard(context, noqueue=None):
     try:
         bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id,
                                         reply_markup=InlineKeyboardMarkup(keyboard))
-    except TimedOutError:
+    except (TimedOutError, RetryAfterError):
         logger.debug('time out in game {}.'.format(bhash))
         game.timeouts += 1
+    except Exception:
+        logger.critical(format_exc())
 
 @run_async
 def handle_button_click(update, context):
@@ -509,8 +533,10 @@ def handle_button_click(update, context):
                                     remain=remain, ttl=ttl)
             try:
                 msg.reply_text(myreply, parse_mode="Markdown")
-            except TimedOutError:
+            except (TimedOutError, RetryAfterError):
                 logger.debug('timeout sending report for game {}'.format(bhash))
+            except Exception:
+                logger.critical(format_exc())
             if game.stopped:
                 game_manager.remove(bhash)
         elif mmap is None or (not array_equal(board.map, mmap)):
