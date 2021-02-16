@@ -94,7 +94,7 @@ class Saved_Game:
         # timestamp of the last update keyboard action,
         # it is used to calculate time gap between
         # two actions and identify unique actions.
-        self.last_action = 0
+        self.last_action = 0.0
         # number of timeout error catched
         self.timeouts = 0
         self.lives = lives
@@ -159,8 +159,9 @@ class GameManager:
         lives = int(board.mines/3)
         if lives <= 0:
             lives = 1
-        self.__games[board_hash] = Game(board, group_id, creator_id, lives=lives)
+        _ng = self.__games[board_hash] = Game(board, group_id, creator_id, lives=lives)
         self.save_async()
+        return _ng
     def remove(self, board_hash):
         board = self.get_game_from_hash(board_hash)
         if board:
@@ -298,13 +299,14 @@ def send_keyboard(update, context):
         msg.reply_text('你输入的是什么鬼！')
         return
     bhash = hash(board)
-    game_manager.append(board, bhash, msg.chat, msg.from_user)
+    game = game_manager.append(board, bhash, msg.chat, msg.from_user)
+    tshash = hash(game.last_action) % 100
     # create a new keyboard
     keyboard = list()
     for row in range(board.height):
         current_row = list()
         for col in range(board.width):
-            cell = InlineKeyboardButton(text=UNOPENED_CELL, callback_data="{} {} {}".format(bhash, row, col))
+            cell = InlineKeyboardButton(text=UNOPENED_CELL, callback_data=f"{bhash} {row} {col} {tshash}")
             current_row.append(cell)
         keyboard.append(current_row)
     # send the keyboard
@@ -433,6 +435,7 @@ def update_keyboard(context, noqueue=None):
             logger.debug('New update action requested, abort this one.')
             return
     def gen_keyboard(board):
+        tshash = hash(game.last_action) % 100
         keyboard = list()
         for row in range(board.height):
             current_row = list()
@@ -447,7 +450,7 @@ def update_keyboard(context, noqueue=None):
                     cell_text = STEPPED_CELL
                 else:
                     cell_text = chr(NUM_CELL_ORD + board.map[row][col] - 10)
-                cell = InlineKeyboardButton(text=cell_text, callback_data="{} {} {}".format(bhash, row, col))
+                cell = InlineKeyboardButton(text=cell_text, callback_data=f"{bhash} {row} {col} {tshash}")
                 current_row.append(cell)
             keyboard.append(current_row)
         return keyboard
@@ -478,7 +481,10 @@ def handle_button_click(update, context):
     try:
         data = data.split(' ')
         data = [int(i) for i in data]
-        (bhash, row, col) = data
+        if len(data) == 3:  # compat
+            data.append(0)
+        (bhash, row, col, tshash) = data
+        assert 0 <= tshash <= 100
     except:
         logger.info('Unknown callback data: {} from user {}'.format(data, user.id))
         return
@@ -500,7 +506,7 @@ def handle_button_click(update, context):
             game.stopped = True
             game.lock.release()
             game.save_action(user, (row, col))
-            if not array_equal(board.map, mmap):
+            if not array_equal(board.map, mmap) or hash(game.last_action) % 100 != tshash:
                 update_keyboard_request(context, bhash, game, chat_id, msg.message_id)
             (s_op, s_is, s_3bv) = board.gen_statistics()
             ops_count = game.actions_sum()
@@ -539,7 +545,7 @@ def handle_button_click(update, context):
                 logger.critical(format_exc())
             if game.stopped:
                 game_manager.remove(bhash)
-        elif mmap is None or (not array_equal(board.map, mmap)):
+        elif mmap is None or (not array_equal(board.map, mmap)) or hash(game.last_action) % 100 != tshash:
             game.lock.release()
             game.save_action(user, (row, col))
             update_keyboard_request(context, bhash, game, chat_id, msg.message_id)
