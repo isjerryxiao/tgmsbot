@@ -90,8 +90,8 @@ def display_username(user, atuser=True, shorten=False, markdown=True):
 class Game:
     def __init__(self, board, group, creator, lives=1):
         self.board = board
-        self.group = group
-        self.creator = creator
+        self.group = self.nobot(group)
+        self.creator = self.nobot(creator)
         self.msgid = None
         self.__actions = dict()
         self.last_player = None
@@ -106,6 +106,10 @@ class Game:
         self.lives = lives
         self.ttl_lives = lives
         self.lock = Lock()
+    @staticmethod
+    def nobot(input):
+        setattr(input, "bot", None)
+        return input
     def __getstate__(self):
         """ https://docs.python.org/3/library/pickle.html#handling-stateful-objects """
         state = self.__dict__.copy()
@@ -116,6 +120,7 @@ class Game:
         self.lock = Lock()
     def save_action(self, user, spot):
         '''spot is supposed to be a tuple'''
+        user = self.nobot(user)
         self.last_player = user
         self.__actions.setdefault(user, list()).append(spot)
     def actions_sum(self):
