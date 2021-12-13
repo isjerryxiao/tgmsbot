@@ -3,12 +3,12 @@
 from mscore import Board, check_params
 from copy import deepcopy
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, run_async
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
 from telegram.error import TimedOut as TimedOutError, RetryAfter as RetryAfterError
 from numpy import array_equal
 from random import randint, choice, randrange
 from math import log
-from threading import Lock
+from threading import Lock, Thread
 import time
 from pathlib import Path
 import pickle
@@ -48,7 +48,7 @@ NUM_CELL_ORD = ord("\uff11") - 1
 
 WIN_TEXT_TEMPLATE = "哇所有奇怪的地方都被你打开啦…好羞羞\n" \
                     "地图：Op {s_op} / Is {s_is} / 3bv {s_3bv}\n操作总数 {ops_count}\n" \
-                    "统计：\n{ops_list}\n{last_player} 你要对人家负责哟/// ///\n\n" \
+                    "统计：\n{ops_list}\n\n{last_player} 你要对人家负责哟/// ///\n\n" \
                     "用时{time}秒，超时{timeouts}次\n\n" \
                     "{last_player} {reward}\n\n" \
                     "/mine 开始新游戏"
@@ -58,11 +58,17 @@ STEP_TEXT_TEMPLATE = "{last_player} 踩到了地雷!\n" \
                     "雷区生命值：({remain}/{ttl})"
 LOSE_TEXT_TEMPLATE = "一道火光之后，你就在天上飞了呢…好奇怪喵\n" \
                     "地图：Op {s_op} / Is {s_is} / 3bv {s_3bv}\n操作总数 {ops_count}\n" \
-                    "统计：\n{ops_list}\n{last_player} 是我们中出的叛徒！\n\n" \
+                    "统计：\n{ops_list}\n\n{last_player} 是我们中出的叛徒！\n\n" \
                     "用时{time}秒，超时{timeouts}次\n\n" \
                     "{last_player} {reward}\n\n" \
                     "/mine 开始新游戏"
 
+def run_async(func):
+    def wrapped(*args, **kwargs):
+        tr = Thread(target=func, args=args, kwargs=kwargs, daemon=True)
+        tr.start()
+        return tr
+    return wrapped
 
 def display_username(user, atuser=True, shorten=False, markdown=True):
     """
@@ -81,7 +87,7 @@ def display_username(user, atuser=True, shorten=False, markdown=True):
             name += " ({})".format(user.username)
     return name
 
-class Saved_Game:
+class Game:
     def __init__(self, board, group, creator, lives=1):
         self.board = board
         self.group = group
@@ -99,13 +105,19 @@ class Saved_Game:
         self.timeouts = 0
         self.lives = lives
         self.ttl_lives = lives
+        self.lock = Lock()
+    def __getstate__(self):
+        """ https://docs.python.org/3/library/pickle.html#handling-stateful-objects """
+        state = self.__dict__.copy()
+        del state['lock']
+        return state
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.lock = Lock()
     def save_action(self, user, spot):
         '''spot is supposed to be a tuple'''
         self.last_player = user
-        if self.__actions.get(user, None):
-            self.__actions[user].append(spot)
-        else:
-            self.__actions[user] = [spot,]
+        self.__actions.setdefault(user, list()).append(spot)
     def actions_sum(self):
         mysum = 0
         for user in self.__actions:
@@ -117,44 +129,24 @@ class Saved_Game:
         return display_username(self.last_player)
     def get_actions(self):
         '''Convert actions into text'''
-        msg = ""
+        msg_l = list()
         for user in self.__actions:
             count = len(self.__actions.get(user, list()))
-            msg = "{}{} - {}项操作\n".format(msg, display_username(user), count)
-        return msg
-
-class Game:
-    def __init__(self, *args, **kwargs):
-        if 'unpickle' in args:
-            assert len(args) == 2 and args[0] == 'unpickle'
-            self.__sg = args[1]
-        else:
-            self.__sg = Saved_Game(*args, **kwargs)
-        self.lock = Lock()
-    def pickle(self):
-        return self.__sg
-    def __getattr__(self, name):
-        return getattr(self.__sg, name)
-    def __setattr__(self, name, val):
-        if name in ('_Game__sg', 'lock'):
-            self.__dict__[name] = val
-        else:
-            return setattr(self.__sg, name, val)
+            msg_l.append(f"{display_username(user)} - {count}项操作")
+        return "\n".join(msg_l)
 
 class GameManager:
     def __init__(self):
+        self.__savelock = Lock()
         self.__games = dict()
         self.__pf = Path(PICKLE_FILE)
         if self.__pf.exists():
             try:
                 with open(self.__pf, 'rb') as fhandle:
-                    saved_games = pickle.load(fhandle, fix_imports=True, errors="strict")
-                    self.__games = {bhash: Game('unpickle', saved_games[bhash]) for bhash in saved_games}
-            except Exception as err:
-                logger.error(f'Unable to load pickle file, {type(err).__name__}: {err}')
+                    self.__games = pickle.load(fhandle, fix_imports=True, errors="strict")
+            except Exception:
+                logger.exception('Unable to load pickle file')
         assert type(self.__games) is dict
-        for board_hash in self.__games:
-            self.__games[board_hash].lock = Lock()
     def append(self, board, board_hash, group_id, creator_id):
         lives = int(board.mines/3)
         if lives <= 0:
@@ -187,15 +179,18 @@ class GameManager:
     def count(self):
         return len(self.__games)
     @run_async
-    def save_async(self):
-        self.save()
-    def save(self):
+    def save_async(self, timeout=1):
+        self.save(timeout=timeout)
+    def save(self, timeout=-1):
+        if not self.__savelock.acquire(timeout=timeout):
+            return
         try:
-            games_without_locks = {bhash: self.__games[bhash].pickle() for bhash in self.__games}
             with open(self.__pf, 'wb') as fhandle:
-                pickle.dump(games_without_locks, fhandle, fix_imports=True)
-        except Exception as err:
-            logger.error(f'Unable to save pickle file, {type(err).__name__}: {err}')
+                pickle.dump(self.__games, fhandle, fix_imports=True)
+        except Exception:
+            logger.exception('Unable to save pickle file')
+        finally:
+            self.__savelock.release()
     def do_garbage_collection(self, context):
         g_checked: int = 0
         g_freed:   int = 0

@@ -371,7 +371,7 @@ def reveal(update, context):
                 and type((btn := kbd[0][0])) is InlineKeyboardButton and (data := btn.callback_data)
             data = data.split(' ')
             data = [int(i) for i in data]
-            (bhash, _, _) = data
+            (bhash, _, _, _) = data
         except:
             msg.reply_text('不是一条有效的消息')
             return
